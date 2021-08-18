@@ -3,14 +3,7 @@
 set -e
 
 hex_to_bytes() {
-    HEX=$(echo "$@" | tr -d '[:space:]')
-    while true; do
-	HEAD=$(echo $HEX | cut -c1,2)
-	[ x"$HEAD" != x ] || break
-	# dash builtin printf doesn't understand \x!
-	/usr/bin/printf \\x$HEAD
-	HEX=$(echo $HEX | cut -c3-)
-    done
+    echo "$@" | tr -d '[:space:]' | xxd -r -p
 }
 
 tlv_hexint() {
@@ -28,21 +21,50 @@ tlv_hexint() {
     fi
 }
 
-# Only handles types < 253, length < 65535.
+# Create a TLV value, hexencoded, given type (int) and contents (hex).
 tlv_hex() {
     TYPE="$1"
     shift
-    CONTENTS="$*"
+    CONTENTS="$(echo -n $* | tr -d '[:space:]')"
     tlv_hexint "$TYPE"
-    LEN=$(($(echo -n "$CONTENTS" | tr -d '[:space:]' | wc -c) / 2))
+    LEN=$(( $(echo "$CONTENTS" | wc -c) / 2))
     tlv_hexint "$LEN"
     echo "$CONTENTS"
 }
 
+# BOLT #12:
+# The Merkle tree's leaves are, in TLV-ascending order for each tlv:
+# 1. The H(`LnLeaf`,tlv).
+lnleaf_hash() {
+    TAGH=`echo -n "LnLeaf" | sha256sum | cut -c1-64`
+    hex_to_bytes $TAGH $TAGH $1 | sha256sum | cut -c1-64
+}
+
+# BOLT #12:
+# 2. The H(`LnAll`|all-tlvs,tlv)
+lnall_hash() {
+    TAGH=`(echo -n "LnAll"; hex_to_bytes $1) | sha256sum | cut -c1-64`
+    hex_to_bytes $TAGH $TAGH $2 | sha256sum | cut -c1-64
+}
+
+merkle_pair()
+{
+    TAGH=`echo -n "LnBranch" | sha256sum | cut -c1-64`
+    if [ "$( (echo $1; echo $2) | sort | head -n1)" = $1 ]; then
+	hex_to_bytes $TAGH $TAGH $1 $2 | sha256sum | cut -c1-64
+    else
+	hex_to_bytes $TAGH $TAGH $2 $1 | sha256sum | cut -c1-64
+    fi
+}
+    
 # See Bolt12 for details
 merkle() {
+    ALL="$1"
+    shift
     if [ $# = 1 ]; then
-	echo "$1"
+	LNLEAF=`lnleaf_hash $1`
+	LNALL=`lnall_hash "$ALL" $1`
+	merkle_pair $LNLEAF $LNALL
 	return
     fi
     ORDER=1
@@ -57,16 +79,12 @@ merkle() {
 	i=$(($i + 1))
     done
 
-    LEFT=$(merkle $LEFTARGS)
-    RIGHT=$(merkle $@)
+    LEFT=$(merkle "$ALL" $LEFTARGS)
+    RIGHT=$(merkle "$ALL" $@)
 
-    if [ "$( (echo $LEFT; echo $RIGHT) | sort | head -n1)" = $LEFT ]; then
-	hex_to_bytes $LEFT $RIGHT | sha256sum | cut -c1-64
-    else
-	hex_to_bytes $RIGHT $LEFT | sha256sum | cut -c1-64
-    fi
+    merkle_pair $LEFT $RIGHT
 }
-       
+
 for arg; do
     case "$arg" in
 	--expiry=*)
@@ -75,13 +93,13 @@ for arg; do
 	    EXPIRY=$(printf %16x $EXPVAL | sed 's/^\(00\)*//')
 	    ;;
 	--vendor=*)
-	    VENDOR=$(echo "${arg#--vendor=}" | od -tx1 -Anone)
+	    VENDOR=$(echo -n "${arg#--vendor=}" | od -tx1 -Anone)
 	    ;;
 	--nodeid=*)
 	    NODEIDS="$NODEIDS ${arg#--nodeid=}"
 	    ;;
 	--description=*)
-	    DESC=$(echo "${arg#--description=}" | od -tx1 -Anone)
+	    DESC=$(echo -n "${arg#--description=}" | od -tx1 -Anone)
 	    ;;
  	--privkeyfile=*)
 	    PRIVKEYFILE="${arg#--privkeyfile=}"
@@ -93,7 +111,7 @@ for arg; do
 	    CHAINFILE="${arg#--chainfile=}"
 	    ;;
 	--help|-h)
-	    echo "Usage: $0 --privkeyfile=privkey.pem --vendor=bootstrap.bolt12.org --nodeid=32-byte-nodeid [--nodeid=...] [--expiry=date] [--certfile=cert.pem] [--chainfile=chain.pem] [--description=please-send-money]" >&2
+	    echo "Usage: $0 --privkeyfile=privkey.pem --vendor=bootstrap.bolt12.org --nodeid=32-byte-nodeid [--nodeid=...] [--expiry=date] [--certfile=cert.pem] [--chainfile=chain.pem] [--description=\"Please send money\"]" >&2
 	    exit 1
 	    ;;
 	*)
@@ -117,7 +135,7 @@ TLVHEX="$TLVHEX $(tlv_hex 20 $VENDOR)"
 TLVHEX="$TLVHEX $(tlv_hex 60 $NODEIDS)"
 
 echo TLVHEX=$TLVHEX >&2
-MERKLE=$(merkle $TLVHEX)
+MERKLE=$(merkle "$TLVHEX" $TLVHEX)
 echo MERKLE=$MERKLE >&2
 
 # Fields 250 - 1000 inclusive don't get included in merkle.
