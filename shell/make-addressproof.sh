@@ -110,8 +110,27 @@ for arg; do
  	--chainfile=*)
 	    CHAINFILE="${arg#--chainfile=}"
 	    ;;
+	--chain=*)
+	    case "${arg#--chain=}" in
+		bitcoin)
+		    CHAIN=6fe28c0ab6f1b372c1a6a246ae63f74f931e8365e15a089c68d6190000000000
+		    ;;
+		testnet)
+		    CHAIN=43497fd7f826957108f4a30fd9cec3aeba79972084e90ead01ea330900000000
+		    ;;
+		regtest)
+		    CHAIN=06226e46111a0b59caaf126043eb5bbf28c34f3a5e332a1fc7b2b73cf188910f
+		    ;;
+		signet)
+		    CHAIN=f61eee3b63a380a477a063af32b2bbc97c9ff9f01f2c4225e973988108000000
+		    ;;
+		*)
+		    echo Unknown chain "${arg#--chain=}" >&2
+		    exit 1
+	    esac
+	    ;;
 	--help|-h)
-	    echo "Usage: $0 --privkeyfile=privkey.pem --vendor=bootstrap.bolt12.org --nodeid=32-byte-nodeid [--nodeid=...] [--expiry=date] [--certfile=cert.pem] [--chainfile=chain.pem] [--description=\"Please send money\"]" >&2
+	    echo "Usage: $0 --privkeyfile=privkey.pem --vendor=bootstrap.bolt12.org --nodeid=32-byte-nodeid [--nodeid=...] [--expiry=date] [--certfile=cert.pem] [--chainfile=chain.pem] [--chain=bitcoin|testnet|regtest|signet] [--description=\"Please send money\"]" >&2
 	    exit 1
 	    ;;
 	*)
@@ -125,6 +144,9 @@ done
 [ -n "$NODEIDS" ] || (echo Need at least one --nodeid >&2; exit 1)
 
 TLVHEX=""
+if [ -n "$CHAIN" ]; then
+    TLVHEX="$TLVHEX $(tlv_hex 2 $CHAIN)"
+fi
 if [ -n "$DESC" ]; then
     TLVHEX="$TLVHEX $(tlv_hex 10 $DESC)"
 fi
@@ -139,7 +161,7 @@ MERKLE=$(merkle "$TLVHEX" $TLVHEX)
 echo MERKLE=$MERKLE >&2
 
 # Fields 250 - 1000 inclusive don't get included in merkle.
-HEXSIG=$(hex_to_bytes $MERKLE | openssl pkeyutl -sign -inkey "$PRIVKEYFILE" | od -tx1 -Anone)
+HEXSIG=$(hex_to_bytes $MERKLE | openssl pkeyutl -sign -inkey "$PRIVKEYFILE" -pkeyopt digest:sha256 -pkeyopt rsa_padding_mode:pss -pkeyopt rsa_pss_saltlen:max | od -tx1 -Anone)
 TLVHEX="$TLVHEX $(tlv_hex 500 $HEXSIG)"
 
 if [ -n "$CERTFILE" ]; then

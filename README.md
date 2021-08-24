@@ -12,11 +12,13 @@ except for BOLT12:
 
 Like lightningaddress.com, you turn username@domain.com into a web request:
 
-	https://domain.com/.well-known/bolt12/username@domain.com
+	https://domain.com/.well-known/bolt12/bitcoin/username@domain.com
 
 But you can also authenticate the entire domain:
 
-	https://domain.com/.well-known/bolt12/domain.com
+	https://domain.com/.well-known/bolt12/bitcoin/domain.com
+
+(Instead of `bitcoin` you could use `testnet`, `signet` or `regtest`)
 
 ## The Format
 
@@ -25,6 +27,9 @@ application/x-lightning-bolt12), containing the following fields:
 
 1. `tlv_stream`: `addressproof`
 2. types:
+    * type: 2 (`chains`)
+    * data:
+        * [`...*chain_hash`:`chains`]
     * type: 10 (`description`)
     * data:
         * [`...*utf8`:`description`]
@@ -63,9 +68,10 @@ The writer:
 - MUST set `vendor` to filename being served:
   - either username@domain or simply domain.
 - MUST set `node_ids` to zero or more node_ids which will be used to sign offers for this vendor.
+- MUST set `chains` to the chains these `node_ids` are valid for, or MAY not set `chains` if the `node_ids` are valid for Bitcoin.
 - MAY set `features`, `absolute_expiry`, `description` and `paths` (see BOLT 12).
-- MUST set `certsignature` to the signature of the BOLT-12 merkle root
-  as per [BOLT12 Signature Calculation](https://bolt12.org/bolt12.html#signature-calculation) using the key in the certificate for the domain in `vendor`.
+- MUST set `certsignature` to the RSA signature (using PSS padding mode maximum saltlen) of the BOLT-12 merkle root
+  as per [BOLT12 Signature Calculation](https://bolt12.org/bolt12.html#signature-calculation) using the secret key for the domain in `vendor`.
 - MUST NOT set `description` unless it has an offer which is constructed using the other fields, and the offer's `node_id` set to the first of the `node_ids`.
 - If it is serving the `addressproof` over HTTPS:
   - MAY set `cert` and `certchain`
@@ -136,9 +142,105 @@ immediate tipping using it.
 You can also include zero node_ids, as a way of indicating that you do
 *not* have any lightning nodes.
 
+## Examples
+
+You will need access to your privkey.pem, cert.pem and chain.pem files
+on your HTTPS webserver which serves the domain.
+
+This creates a proof that `bolt12.org` operates nodeid
+4b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc449605 (note
+we omit the 02/03 prefix):
+
+```
+$ ./shell/make-addressproof.sh \
+   --vendor=bolt12.org \
+   --nodeid=4b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc449605 \
+   --privkeyfile=certs/privkey.pem \
+   --certfile=certs/cert.pem \
+   --chainfile=certs/chain.pem > .well-known/bolt12/bitcoin/bolt12.org
+```
+
+This does the same thing using the Python script:
+
+```
+$ ./python/bolt12address.py create \
+   --raw \
+   bolt12.org \
+   certs/privkey.pem \
+   certs/cert.pem \
+   certs/chain.pem \
+   4b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc449605 \
+   > .well-known/bolt12/bitcoin/bolt12.org
+```
+
+This creates a *signet* signature for multiple nodeids, for the user
+*rusty@bolt12.org*, and adds a description so it can also serve as
+offer for sending unsolicited payments (note: see below!):
+
+```
+$ ./shell/make-addressproof.sh \
+   --vendor=rusty@bolt12.org \
+   --nodeid=4b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc449605 \
+   --nodeid=994b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc4496 \
+   --privkeyfile=certs/privkey.pem \
+   --certfile=certs/cert.pem \
+   --chainfile=certs/chain.pem \
+   --chain=signet \
+   --description='Unsolicited bolt12address donation' \
+   > .well-known/bolt12/signet/rusty@bolt12.org
+```
+
+And in Python:
+
+```
+$ ./python/bolt12address.py create \
+   --raw \
+   --description='Unsolicited bolt12address donation' \
+   --chain=signet \
+   rusty@bolt12.org \
+   certs/privkey.pem \
+   certs/cert.pem \
+   certs/chain.pem \
+   4b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc449605 \
+   994b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc4496 \
+   > .well-known/bolt12/signet/rusty@bolt12.org
+```
+
+We can check this using python:
+
+```
+$ ./python/bolt12address.py check --raw-stdin < .well-known/bolt12/signet/rusty@bolt12.org
+chains: ['f61eee3b63a380a477a063af32b2bbc97c9ff9f01f2c4225e973988108000000']
+description: Unsolicited bolt12address donation
+vendor: rusty@bolt12.org
+node_ids: ['4b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc449605', '994b9a1fa8e006f1e3937f65f66c408e6da8e1ca728ea43222a7381df1cc4496']
+certsignature: 173e...
+
+offer_id: 3234297fb2414b62c16ac9751ac241050199ec5e2cd83e713136cc26974f09a8
+offer_id: 3139b327c9fa6637a7ef620149425a1163e19a1181c9f1cbdc7820360dd40c23
+```
+
+The `offer_id` at the end if `description` is populated (one for each
+node_id) is the offer_id anyone reading would expect to be able to
+send funds to.  You should create this offer (with that description
+and no amount) on your node!
+
+
 ## TODO
 
-There are numerous different certificate formats on the web.  I
-prototyped using my bolt12.org [Let's
-Encrypt](https://letsencrypt.org/) certificate, and the simple openssl
-pkeyutl command to produce a signature.
+This is a draft: I expect it to change after feedback (especially
+since the certinficates and signatures are large and clunky).
+
+The code does not check the certificate chain, and is generally could
+use polishing.
+
+We also need more routines in different languages to fetch and check
+the bolt12address, and a method so Lightning nodes can serve their
+addressproof directly.
+
+## Feedback
+
+You can reach out to me as rusty@rustcorp.com.au or join the bolt12
+telegram group at https://t.me/bolt12org.
+
+Happy hacking!
