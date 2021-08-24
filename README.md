@@ -123,7 +123,7 @@ encoded as a string.
 This allows domain validation for bolt 12 offers, which already have a
 vendor field for this purpose.  e.g if the vendor in an offer is
 "blockstream.com Get your blocks here!" then your wallet can reach out
-to blockstream.com to see if it the node_id the offer really is under
+to blockstream.com to see if it the node_id in the offer really is under
 their control.
 
 It also allows node_id proofs for individual addresses.
@@ -133,11 +133,11 @@ your wallet vendor, or the node claiming to be blockstream.com) can
 collect all the `addressproof`s and certificates for you, as they
 contain a signature using the existing web certificate infrastructure.
 Bundling these protects your privacy more than having to request to a
-vendor's website before making your first payment.
+vendor's website before making a payment.
 
 This format is a subset of the BOLT12 offer format, so if it has a
 `description` it is actually a valid (amountless) offer, allowing
-immediate tipping using it.  
+immediate tipping using it.
 
 You can also include zero node_ids, as a way of indicating that you do
 *not* have any lightning nodes.
