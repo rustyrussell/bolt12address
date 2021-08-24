@@ -1,6 +1,6 @@
 # BOLT12 Address Support (DRAFT!)
 
-Inspired by the awesome [lightingaddress.com](https://lightingaddress.com),
+Inspired by the awesome [lightningaddress.com](https://lightningaddress.com),
 except for BOLT12:
 
 1. Supports BOLT12
