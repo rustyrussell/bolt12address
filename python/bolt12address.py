@@ -242,7 +242,7 @@ if __name__ == "__main__":
     createparser.add_argument('--expiry',
                               help='The absolute time for the address proof to expire, in seconds since 1970', type=int)
     createparser.add_argument('--rel-expiry',
-                              help='The number of seconds from now for the addressproof to expire')
+                              help='The number of seconds from now for the addressproof to expire', type=int)
     # FIXME: Add blinded paths!
     createparser.add_argument('nodeid', nargs='*',
                               help='Lightning node id for this vendor (can be multiple)')
