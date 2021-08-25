@@ -195,10 +195,14 @@ def check(args):
             print("Incomplete bolt12 string", file=sys.stderr)
             sys.exit(1)
 
-        ap = dec.result()
+        ap, whybad = dec.result()
+        if ap is None:
+            print("Bad lnap encoding: {}".format(whybad), file=sys.stderr)
+            sys.exit(1)
+
         ok, whybad = ap.check()
         if not ok:
-            print("Bad lnap: {}".format(whybad), file=sys.stderr)
+            print("Invalid lnap: {}".format(whybad), file=sys.stderr)
             sys.exit(1)
 
     # FIXME: Get pretty!
