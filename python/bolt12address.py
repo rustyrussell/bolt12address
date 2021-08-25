@@ -2,6 +2,8 @@
 import argparse
 import generated
 import bolt12
+import os
+import tempfile
 import time
 import sys
 from typing import Tuple, Sequence, Optional
@@ -223,6 +225,66 @@ def check(args):
             print('offer_id: {}'.format(offer.merkle().hex()))
 
 
+def refresh(args):
+    """Refresh: exits 1 if it can't refresh all of them"""
+    if args.expiry and args.rel_expiry:
+        print("Cannot specify both --expiry and --rel-expiry",
+              file=sys.stderr)
+        sys.exit(1)
+
+    if args.rel_expiry:
+        args.expiry = int(time.time()) + args.rel_expiry
+
+    with open(args.privkeyfile, "rb") as f:
+        privkey_pem = f.read()
+    with open(args.certfile, "rb") as f:
+        cert_pem = f.read()
+    with open(args.chainfile, "rb") as f:
+        chain_pem = f.read()
+
+    allok = True
+    # FIXME: If it's a directory, scan its contents?
+    for fname in args.files:
+        try:
+            with open(fname, "rb") as f:
+                ap = AddressProof(f.read())
+        except Exception as e:
+            print("{}: NOT AN ADDRPROOF: {}".format(fname, e))
+            allok = False
+            continue
+
+        if args.expiry:
+            values['absolute_expiry'] = args.expiry
+        ap.values['cert'] = cert_pem
+        ap.values['certchain'] = chain_pem
+
+        key = load_pem_private_key(privkey_pem, password=None)
+        sig = key.sign(ap.merkle(),
+                       padding.PSS(mgf=padding.MGF1(hashes.SHA256()),
+                                   salt_length=padding.PSS.MAX_LENGTH),
+                       utils.Prehashed(hashes.SHA256()))
+        ap.values['certsignature'] = sig
+        ok, whybad = ap.check()
+
+        if not ok:
+            print("{}: FAILED REGEN CHECK? {}".format(fname, whybad))
+            allok = False
+            continue
+
+        # We want this in the same dir, for atomicity.
+        tmpfd, tmpfname = tempfile.mkstemp(suffix=".refreshing",
+                                           dir=os.path.dirname(fname))
+        tmpf = os.fdopen(tmpfd, 'wb')
+        tmpf.write(bolt12.helper_towire_tlv(ap.tlv_table,
+                                            ap.values, ap.unknowns))
+        tmpf.close()
+        os.replace(tmpfname, fname)
+        print("{}: REFRESHED".format(fname))
+
+    if not allok:
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Tool to create/validate bolt12 address proofs')
     subparsers = parser.add_subparsers()
@@ -257,6 +319,17 @@ if __name__ == "__main__":
                               help='Read raw bytes from stdin instead of using cm1dline lnap1 format')
     checkparser.add_argument('ap', nargs='*', help='lnap1 string to check')
     checkparser.set_defaults(func=check)
+
+    refreshparser = subparsers.add_parser('refresh')
+    refreshparser.add_argument('privkeyfile', help='privkey.pem file for DOMAIN')
+    refreshparser.add_argument('certfile', help='cert.pem file for DOMAIN')
+    refreshparser.add_argument('chainfile', help='chain.pem file for DOMAIN')
+    refreshparser.add_argument('files', nargs='+', help='Files to regenerate')
+    refreshparser.add_argument('--expiry',
+                               help='The absolute time for the address proof to expire, in seconds since 1970', type=int)
+    refreshparser.add_argument('--rel-expiry',
+                               help='The number of seconds from now for the addressproof to expire', type=int)
+    refreshparser.set_defaults(func=refresh)
 
     args = parser.parse_args()
     args.func(args)

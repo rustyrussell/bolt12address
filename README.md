@@ -225,6 +225,23 @@ node_id) is the offer_id anyone reading would expect to be able to
 send funds to.  You should create this offer (with that description
 and no amount) on your node!
 
+## Refreshing Existing Proofs
+
+There's a simple helper to refresh existing address proofs, such as
+when your certificate changes:
+
+```
+$ ./python/bolt12address.py refresh \
+   certs/privkey.pem \
+   certs/cert.pem \
+   certs/chain.pem \
+   .well-known/bolt12/signet/*bolt12.org
+.well-known/bolt12/signet/rusty@bolt12.org: REFRESHED
+```
+
+
+
+
 
 ## TODO
 
